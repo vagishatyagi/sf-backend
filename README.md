@@ -1,5 +1,7 @@
 # Contacts Backend
 
+A harmless Qodo integration smoke-test change.
+
 A self-contained Contacts REST API built with **FastAPI** + **SQLAlchemy**, backed by an
 **in-memory SQLite database** by default. No external database, container, or migration
 step is needed — start the process and the API is ready.
