@@ -148,6 +148,32 @@ def test_photo_is_optional_nullable_and_documented(spec, schema_name):
     assert {variant.get("type") for variant in photo["anyOf"]} == {"string", "null"}
 
 
+def test_nested_address_schemas_are_documented(spec):
+    schemas = spec["components"]["schemas"]
+    assert schemas["AddressType"]["enum"] == ["Home", "Work", "Other"]
+
+    create = schemas["AddressCreate"]
+    assert set(create["required"]) == {"type", "address"}
+    assert create["properties"]["address"]["maxLength"] == 300
+
+    read = schemas["AddressRead"]
+    assert "id" in read["required"]
+    assert read["properties"]["id"]["description"]
+
+
+@pytest.mark.parametrize(
+    "schema_name",
+    ["ContactCreate", "ContactReplace", "ContactUpdate", "ContactRead"],
+)
+def test_contacts_use_nested_addresses_instead_of_flat_fields(spec, schema_name):
+    schema = spec["components"]["schemas"][schema_name]
+    properties = schema["properties"]
+
+    assert "addresses" in properties
+    assert properties["addresses"]["type"] == "array"
+    assert {"address", "city", "state", "postal_code", "country"}.isdisjoint(properties)
+
+
 def test_request_bodies_carry_examples(spec):
     create = spec["components"]["schemas"]["ContactCreate"]
     assert len(create["examples"]) == 2
