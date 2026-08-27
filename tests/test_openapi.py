@@ -134,6 +134,20 @@ def test_contact_fields_are_described_and_have_examples(spec):
     assert schema["properties"]["full_name"]["description"]
 
 
+@pytest.mark.parametrize(
+    "schema_name",
+    ["ContactCreate", "ContactReplace", "ContactUpdate", "ContactRead"],
+)
+def test_photo_is_optional_nullable_and_documented(spec, schema_name):
+    schema = spec["components"]["schemas"][schema_name]
+
+    assert "photo" in schema["properties"]
+    assert "photo" not in schema.get("required", [])
+    photo = schema["properties"]["photo"]
+    assert photo["description"]
+    assert {variant.get("type") for variant in photo["anyOf"]} == {"string", "null"}
+
+
 def test_request_bodies_carry_examples(spec):
     create = spec["components"]["schemas"]["ContactCreate"]
     assert len(create["examples"]) == 2

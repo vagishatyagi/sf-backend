@@ -1,4 +1,18 @@
+import base64
+
+import pytest
+
+
 BASE = "/api/v1/contacts"
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+
+
+def photo_data_url(media_type: str, content: bytes) -> str:
+    encoded = base64.b64encode(content).decode("ascii")
+    return f"data:{media_type};base64,{encoded}"
+
+
+PNG_PHOTO = photo_data_url("image/png", b"\x89PNG\r\n\x1a\nphoto")
 
 
 def test_health(client):
@@ -132,6 +146,122 @@ def test_put_missing_contact_returns_404(client):
         json={"first_name": "A", "last_name": "B", "email": "ab@example.com"},
     )
     assert response.status_code == 404
+
+
+def test_photo_defaults_to_null(client, payload):
+    response = client.post(BASE, json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["photo"] is None
+
+
+@pytest.mark.parametrize(
+    "media_type, content",
+    [
+        ("image/jpeg", b"\xff\xd8\xffphoto"),
+        ("image/png", b"\x89PNG\r\n\x1a\nphoto"),
+        ("image/webp", b"RIFF\x00\x00\x00\x00WEBPphoto"),
+        ("image/gif", b"GIF89aphoto"),
+    ],
+)
+def test_photo_round_trips_through_create_list_and_get(client, payload, media_type, content):
+    photo = photo_data_url(media_type, content)
+
+    created = client.post(BASE, json={**payload, "photo": photo})
+    assert created.status_code == 201
+    contact_id = created.json()["id"]
+    assert created.json()["photo"] == photo
+
+    listed = client.get(BASE)
+    assert listed.json()["items"][0]["photo"] == photo
+
+    fetched = client.get(f"{BASE}/{contact_id}")
+    assert fetched.json()["photo"] == photo
+
+
+def test_patch_omitting_photo_preserves_it(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": PNG_PHOTO}).json()["id"]
+
+    response = client.patch(f"{BASE}/{contact_id}", json={"job_title": "Countess"})
+
+    assert response.status_code == 200
+    assert response.json()["photo"] == PNG_PHOTO
+
+
+def test_patch_can_replace_photo(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": PNG_PHOTO}).json()["id"]
+    replacement = photo_data_url("image/gif", b"GIF89areplacement")
+
+    replaced = client.patch(f"{BASE}/{contact_id}", json={"photo": replacement})
+    assert replaced.status_code == 200
+    assert replaced.json()["photo"] == replacement
+
+
+def test_patch_can_clear_photo(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": PNG_PHOTO}).json()["id"]
+
+    cleared = client.patch(f"{BASE}/{contact_id}", json={"photo": None})
+
+    assert cleared.status_code == 200
+    assert cleared.json()["photo"] is None
+
+
+def test_put_omitting_photo_clears_it(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": PNG_PHOTO}).json()["id"]
+
+    response = client.put(f"{BASE}/{contact_id}", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["photo"] is None
+
+
+def test_put_resubmitting_photo_preserves_it(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": PNG_PHOTO}).json()["id"]
+
+    response = client.put(f"{BASE}/{contact_id}", json={**payload, "photo": PNG_PHOTO})
+
+    assert response.status_code == 200
+    assert response.json()["photo"] == PNG_PHOTO
+
+
+@pytest.mark.parametrize(
+    "photo",
+    [
+        "https://example.com/photo.png",
+        photo_data_url("image/svg+xml", b"<svg></svg>"),
+        "data:image/png;base64,%%%",
+        "data:image/png;base64,",
+        photo_data_url("image/png", b"GIF89anot-a-png"),
+    ],
+)
+def test_rejects_invalid_photo_data(client, payload, photo):
+    response = client.post(BASE, json={**payload, "photo": photo})
+
+    assert response.status_code == 422
+
+
+def test_accepts_photo_at_exact_size_limit(client, payload):
+    content = b"\xff\xd8\xff" + b"x" * (MAX_PHOTO_BYTES - 3)
+    photo = photo_data_url("image/jpeg", content)
+
+    response = client.post(
+        BASE,
+        json={**payload, "photo": photo},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["photo"] == photo
+
+
+def test_rejects_photo_over_size_limit(client, payload):
+    content = b"\xff\xd8\xff" + b"x" * (MAX_PHOTO_BYTES - 2)
+
+    response = client.post(
+        BASE,
+        json={**payload, "photo": photo_data_url("image/jpeg", content)},
+    )
+
+    assert response.status_code == 422
 
 
 def test_delete_contact(client, payload):
