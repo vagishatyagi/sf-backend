@@ -137,8 +137,9 @@ def replace_contact(
     """
     Replace every field of an existing contact.
 
-    This is a true `PUT`: optional fields you leave out of the body are cleared
-    to `null`. To change a subset of fields, use `PATCH` instead.
+    Optional scalar fields omitted from the body are cleared to `null`. An
+    explicit `addresses` list replaces the collection, while omission preserves
+    existing address rows for compatibility. Use `PATCH` for other partial updates.
     """
     contact = _get_or_404(db, contact_id)
     _reject_duplicate_email(db, payload.email, exclude_id=contact_id)
@@ -161,9 +162,10 @@ def update_contact(
     """
     Update only the fields present in the request body.
 
-    Fields you omit keep their current value. Re-sending a contact's own email
-    address is allowed; using an email that belongs to a different contact
-    returns `409 Conflict`.
+    Fields you omit keep their current value. When present, `addresses` replaces
+    the complete ordered collection; an empty list clears it. Re-sending a
+    contact's own email address is allowed; using an email that belongs to a
+    different contact returns `409 Conflict`.
     """
     contact = _get_or_404(db, contact_id)
     if payload.email is not None:

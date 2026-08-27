@@ -97,7 +97,7 @@ also read):
 | `POST` | `/api/v1/contacts` | Create a contact → `201` |
 | `GET` | `/api/v1/contacts` | List with search, sort, pagination |
 | `GET` | `/api/v1/contacts/{id}` | Fetch one contact |
-| `PUT` | `/api/v1/contacts/{id}` | Full replace (omitted fields are cleared) |
+| `PUT` | `/api/v1/contacts/{id}` | Full replace (omitted scalar fields clear; omitted addresses are preserved) |
 | `PATCH` | `/api/v1/contacts/{id}` | Partial update (only sent fields change) |
 | `DELETE` | `/api/v1/contacts/{id}` | Delete → `204` |
 
@@ -108,10 +108,16 @@ also read):
 
 ```
 first_name, last_name, email, phone, company, job_title,
-address, city, state, postal_code, country, notes
+notes, photo, addresses
 ```
 
-Responses add `id`, `full_name`, `created_at`, and `updated_at` (UTC).
+`addresses` is an ordered array. Each address has a required `address` and
+`type` (`Home`, `Work`, or `Other`), plus optional `city`, `state`,
+`postal_code`, and `country`. Send an explicit empty array in `PUT` or `PATCH`
+to remove every address; omitting the field preserves the current addresses.
+
+Responses add `id`, `full_name`, `created_at`, and `updated_at` (UTC), and each
+stored address includes its own `id`.
 
 ### List query parameters
 
