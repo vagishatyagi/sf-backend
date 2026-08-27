@@ -1,6 +1,77 @@
+import base64
+import binascii
+import re
 from datetime import datetime, timezone
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    computed_field,
+    field_validator,
+)
+
+
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_BASE64_LENGTH = ((MAX_PHOTO_BYTES + 2) // 3) * 4
+MAX_PHOTO_DATA_URL_LENGTH = len("data:image/jpeg;base64,") + MAX_PHOTO_BASE64_LENGTH
+
+_PHOTO_DATA_URL = re.compile(
+    r"data:(image/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})"
+)
+_PHOTO_EXAMPLE = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf"
+    "FcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _matches_image_signature(media_type: str, content: bytes) -> bool:
+    if media_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if media_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if media_type == "image/gif":
+        return content.startswith((b"GIF87a", b"GIF89a"))
+    if media_type == "image/webp":
+        return (
+            len(content) >= 12
+            and content.startswith(b"RIFF")
+            and content[8:12] == b"WEBP"
+        )
+    return False
+
+
+def _validate_photo_data_url(value: str) -> str:
+    match = _PHOTO_DATA_URL.fullmatch(value)
+    if match is None:
+        raise ValueError("Photo must be a base64 JPEG, PNG, WebP, or GIF data URL")
+
+    media_type, encoded = match.groups()
+    if len(encoded) > MAX_PHOTO_BASE64_LENGTH:
+        raise ValueError("Photo must be 2 MiB or smaller")
+
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("Photo contains invalid base64 data") from error
+
+    if not content:
+        raise ValueError("Photo must not be empty")
+    if len(content) > MAX_PHOTO_BYTES:
+        raise ValueError("Photo must be 2 MiB or smaller")
+    if not _matches_image_signature(media_type, content):
+        raise ValueError("Photo content does not match its declared image type")
+    return value
+
+
+PhotoDataUrl = Annotated[
+    str,
+    Field(max_length=MAX_PHOTO_DATA_URL_LENGTH),
+    AfterValidator(_validate_photo_data_url),
+]
 
 
 class ContactBase(BaseModel):
@@ -69,6 +140,14 @@ class ContactBase(BaseModel):
         description="Free-form notes about the contact. No length limit.",
         examples=["Met at the SF hackathon."],
     )
+    photo: PhotoDataUrl | None = Field(
+        default=None,
+        description=(
+            "Contact photo as a base64 JPEG, PNG, WebP, or GIF data URL. "
+            "The decoded image must be 2 MiB or smaller."
+        ),
+        examples=[_PHOTO_EXAMPLE],
+    )
 
 
 _FULL_EXAMPLE = {
@@ -84,6 +163,7 @@ _FULL_EXAMPLE = {
     "postal_code": "94105",
     "country": "USA",
     "notes": "Met at the SF hackathon.",
+    "photo": _PHOTO_EXAMPLE,
 }
 _MINIMAL_EXAMPLE = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
 
@@ -134,6 +214,10 @@ class ContactUpdate(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
     country: str | None = Field(default=None, max_length=120, description="New country.")
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
+    photo: PhotoDataUrl | None = Field(
+        default=None,
+        description="New photo data URL. Send `null` to remove the current photo.",
+    )
 
 
 class ContactRead(ContactBase):
